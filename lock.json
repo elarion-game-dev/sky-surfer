@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "realm": "elarion",
+  "salt": "S/1IJVWvi0bFy7hzTMcz40T7GkuVH8YTomhNMkObtL4=",
+  "iterations": 600000,
+  "deploy": "172f5cce75914a9b",
+  "slots": [
+    "zfdrDn75d7D3/B3J5ZYLvDGLw90LYquldqWDGROygteFeA7WAkZHNf3RuWn3oRb9ySjgxEY6W6yk0gKJsjxr22stsg6C5nNk4Cieyh1mpZ3wXOXHFaVqnvWA3ng=",
+    "u1am7ghaDktNSBPH4zePAbs8LobGPYS6Ph4jvE7edbXijceC0Tm8l/ucpD6r1TCOgNPNM9OP9w550wrNz+di+4kPp222UWhGZVy/ZC6c78RzXLEZN+yke2TiwFI="
+  ],
+  "public": [
+    "favicon.svg",
+    "preview.jpg"
+  ]
+}

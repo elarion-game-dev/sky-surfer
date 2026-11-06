@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Sky Surfer</title>
+    <meta name="description" content="Surf down the Alps at insane speed: Source-style surf ramps, wingsuit flights and a grappling hook, against the clock." />
+    <meta name="build" content="2eddd0b" />
+    <meta name="theme-color" content="#6faedd" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Sky Surfer" />
+    <meta property="og:description" content="Surf down the Alps at insane speed: Source-style surf ramps, wingsuit flights and a grappling hook, against the clock." />
+    <meta property="og:url" content="https://elarion-game-dev.github.io/sky-surfer/" />
+    <meta property="og:image" content="https://elarion-game-dev.github.io/sky-surfer/preview.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="A first-person view at speed down a narrow surf ramp through a rock gorge at sunset" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Sky Surfer" />
+    <meta name="twitter:description" content="Surf down the Alps at insane speed: Source-style surf ramps, wingsuit flights and a grappling hook, against the clock." />
+    <meta name="twitter:image" content="https://elarion-game-dev.github.io/sky-surfer/preview.jpg" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <style>
+      :root {
+        --bg: #f4f2ee;
+        --card: #ffffff;
+        --text: #1d1f23;
+        --muted: #62666e;
+        --line: #d9d6cf;
+        --accent: #2c5be0;
+        --accent-text: #ffffff;
+        --bad: #b3261e;
+        color-scheme: light;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #121418;
+          --card: #1c1f25;
+          --text: #eceef2;
+          --muted: #9aa0aa;
+          --line: #343842;
+          --accent: #7c9cff;
+          --accent-text: #0c0e12;
+          --bad: #ff8a80;
+          color-scheme: dark;
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; }
+      body {
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      main {
+        width: 100%;
+        max-width: 380px;
+        padding: 28px 24px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+      }
+      h1 { margin: 0 0 4px; font-size: 1.35rem; line-height: 1.25; }
+      p { margin: 0 0 20px; color: var(--muted); }
+      label { display: block; font-weight: 600; margin-bottom: 6px; }
+      input[type="password"] {
+        width: 100%;
+        padding: 10px 12px;
+        font: inherit;
+        color: inherit;
+        background: transparent;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      input[type="password"]:focus-visible, button:focus-visible, input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .remember { display: flex; gap: 8px; align-items: center; margin: 14px 0 18px; font-weight: 400; color: var(--muted); }
+      .remember input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+      button {
+        width: 100%;
+        padding: 11px 12px;
+        font: inherit;
+        font-weight: 600;
+        color: var(--accent-text);
+        background: var(--accent);
+        border: 0;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.55; cursor: default; }
+      #status { min-height: 1.5em; margin: 14px 0 0; color: var(--bad); }
+      #status.info { color: var(--muted); }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="title"></h1>
+      <p id="lead">This build is private. Enter the password to play.</p>
+      <form id="form" hidden>
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" required />
+        <label class="remember"><input id="remember" type="checkbox" /> Remember this device</label>
+        <button id="submit" type="submit">Unlock</button>
+      </form>
+      <p id="status" class="info" role="status" aria-live="polite">Loading…</p>
+    </main>
+    <script>
+      'use strict';
+      const CONFIG = {"realm":"elarion","title":"Sky Surfer"};
+      const REALM = CONFIG.realm;
+      const SESSION_KEY = `pages-lock:kek:${REALM}`;
+      const RETRY_KEY = `pages-lock:retry:${location.pathname}`;
+      const ATTEMPTS_KEY = `pages-lock:attempts:${REALM}`;
+      const SLOT_AAD = new TextEncoder().encode('pages-lock/slot');
+      // Failures (counted from the last success) at which a wait starts; the last blocks the device.
+      const TIERS = [
+        { at: 5, wait: 5 * 60_000, label: '5-minute' },
+        { at: 8, wait: 15 * 60_000, label: '15-minute' },
+        { at: 11, wait: 60 * 60_000, label: '1-hour' },
+        { at: 14, wait: 24 * 60 * 60_000, label: '24-hour' },
+        { at: 17, wait: Infinity, label: 'block' },
+      ];
+
+      const $ = (id) => document.getElementById(id);
+      const form = $('form');
+      const input = $('password');
+      const remember = $('remember');
+      const submit = $('submit');
+      const status = $('status');
+      $('title').textContent = CONFIG.title || document.title || 'Private build';
+
+      function say(text, info = false) {
+        status.textContent = text;
+        status.className = info ? 'info' : '';
+      }
+
+      // ---- Storage: the origin's IndexedDB (shared with the service worker) plus a localStorage mirror
+
+      function idb() {
+        return new Promise((resolve, reject) => {
+          const open = indexedDB.open('pages-lock', 1);
+          open.onupgradeneeded = () => open.result.createObjectStore('kv');
+          open.onsuccess = () => resolve(open.result);
+          open.onerror = () => reject(open.error);
+        });
+      }
+      async function idbGet(key) {
+        const db = await idb();
+        return new Promise((resolve, reject) => {
+          const req = db.transaction('kv').objectStore('kv').get(key);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+      async function idbSet(key, value) {
+        const db = await idb();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put(value, key);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+      }
+
+      const NO_ATTEMPTS = { fails: 0, until: 0, banned: false };
+      function readLocal() {
+        try {
+          return JSON.parse(localStorage.getItem(ATTEMPTS_KEY)) || NO_ATTEMPTS;
+        } catch {
+          return NO_ATTEMPTS;
+        }
+      }
+      /** The stricter of the two copies, so clearing one does not reset the count. */
+      async function readAttempts() {
+        const a = readLocal();
+        const b = (await idbGet(`attempts:${REALM}`).catch(() => undefined)) || NO_ATTEMPTS;
+        return { fails: Math.max(a.fails, b.fails), until: Math.max(a.until, b.until), banned: Boolean(a.banned || b.banned) };
+      }
+      async function writeAttempts(a) {
+        try {
+          localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(a));
+        } catch {}
+        await idbSet(`attempts:${REALM}`, a).catch(() => {});
+      }
+
+      // ---- Keys
+
+      const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+      const toHex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+
+      async function derive(password, lock, extractable) {
+        const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password.normalize('NFC').trim()), 'PBKDF2', false, ['deriveKey']);
+        return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: fromB64(lock.salt), iterations: lock.iterations, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, extractable, ['decrypt']);
+      }
+      async function opens(kek, lock) {
+        for (const slot of lock.slots) {
+          const bytes = fromB64(slot);
+          try {
+            await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.subarray(0, 12), additionalData: SLOT_AAD }, kek, bytes.subarray(12));
+            return true;
+          } catch {}
+        }
+        return false;
+      }
+      function tell(worker, kekHex) {
+        return new Promise((resolve) => {
+          const channel = new MessageChannel();
+          const timer = setTimeout(() => resolve(false), 5000);
+          channel.port1.onmessage = (e) => {
+            clearTimeout(timer);
+            resolve(e.data === true);
+          };
+          worker.postMessage({ type: 'pages-lock:unlock', kek: kekHex }, [channel.port2]);
+        });
+      }
+      function enter() {
+        sessionStorage.setItem(RETRY_KEY, String(Date.now()));
+        location.reload();
+      }
+
+      // ---- Waits
+
+      let countdown = 0;
+      function tierAfter(fails) {
+        return TIERS.find((t) => t.at > fails);
+      }
+      function showLocked(a) {
+        clearInterval(countdown);
+        if (a.banned) {
+          form.hidden = true;
+          say('Too many wrong passwords. This device is blocked.');
+          return true;
+        }
+        if (a.until <= Date.now()) return false;
+        submit.disabled = true;
+        input.disabled = true;
+        const tick = () => {
+          const left = a.until - Date.now();
+          if (left <= 0) {
+            clearInterval(countdown);
+            submit.disabled = false;
+            input.disabled = false;
+            say('');
+            input.focus();
+            return;
+          }
+          const s = Math.ceil(left / 1000);
+          const h = Math.floor(s / 3600);
+          const m = Math.floor((s % 3600) / 60);
+          const clock = h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : `${m}:${String(s % 60).padStart(2, '0')}`;
+          say(`Too many wrong passwords. Try again in ${clock}.`);
+        };
+        tick();
+        countdown = setInterval(tick, 1000);
+        return true;
+      }
+
+      // ---- Flow
+
+      async function main() {
+        if (!('serviceWorker' in navigator) || !window.crypto?.subtle || !window.indexedDB) {
+          say('This browser cannot open private builds here. Private or incognito windows often block what it needs: try a normal window.');
+          return;
+        }
+        const registration = await navigator.serviceWorker.register('./pages-lock-sw.js', { scope: './' });
+        await navigator.serviceWorker.ready;
+        const worker = registration.active;
+        const lock = await (await fetch('./lock.json', { cache: 'no-cache' })).json();
+
+        // Already unlocked (remembered on this device, or earlier in this tab): reload into the build,
+        // unless that was just tried, so a failure shows the form instead of looping.
+        const retried = Date.now() - Number(sessionStorage.getItem(RETRY_KEY) || 0) < 8000;
+        sessionStorage.removeItem(RETRY_KEY);
+        const attempts = await readAttempts();
+        if (!retried && !attempts.banned) {
+          const kept = await idbGet(`kek:${REALM}`).catch(() => undefined);
+          if (kept && (await opens(kept, lock))) return enter();
+          const hex = sessionStorage.getItem(SESSION_KEY);
+          if (hex && (await tell(worker, hex))) return enter();
+        }
+
+        form.hidden = false;
+        say('');
+        if (!showLocked(attempts)) input.focus();
+
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const before = await readAttempts();
+          if (showLocked(before) || !input.value) return;
+          submit.disabled = true;
+          say('Checking…', true);
+          const keep = remember.checked;
+          const kek = await derive(input.value, lock, !keep);
+          if (await opens(kek, lock)) {
+            await writeAttempts(NO_ATTEMPTS);
+            if (keep) {
+              await idbSet(`kek:${REALM}`, kek);
+            } else {
+              const hex = toHex(await crypto.subtle.exportKey('raw', kek));
+              sessionStorage.setItem(SESSION_KEY, hex);
+              if (!(await tell(worker, hex))) {
+                submit.disabled = false;
+                return say('Could not open the build. Reload the page and try again.');
+              }
+            }
+            say('Opening…', true);
+            return enter();
+          }
+          const fails = before.fails + 1;
+          const hit = TIERS.find((t) => t.at === fails);
+          const next = { fails, until: hit && hit.wait !== Infinity ? Date.now() + hit.wait : 0, banned: Boolean(hit && hit.wait === Infinity) };
+          await writeAttempts(next);
+          submit.disabled = false;
+          input.value = '';
+          if (showLocked(next)) return;
+          const tier = tierAfter(fails);
+          const left = tier.at - fails;
+          const then = tier.wait === Infinity ? 'this device is blocked' : `a ${tier.label} wait`;
+          say(`Wrong password. ${left} ${left === 1 ? 'try' : 'tries'} left before ${then}.`);
+          input.focus();
+        });
+      }
+
+      main().catch((error) => {
+        console.error(error);
+        say('Something went wrong. Reload the page to try again.');
+      });
+    </script>
+  </body>
+</html>
